@@ -1,0 +1,6 @@
+{
+    "idf.portWin": "COM4",
+    "files.associations": {
+        "board_api.h": "c"
+    }
+}

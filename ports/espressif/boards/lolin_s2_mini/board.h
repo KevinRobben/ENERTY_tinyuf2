@@ -35,7 +35,7 @@
 
 // GPIO that implement 1-bit memory with RC components which hold the
 // pin value long enough for double reset detection.
-// #define PIN_DOUBLE_RESET_RC
+#define PIN_DOUBLE_RESET_RC   36
 
 //--------------------------------------------------------------------+
 // LED
@@ -69,5 +69,5 @@
 
 #define UF2_PRODUCT_NAME  USB_MANUFACTURER " " USB_PRODUCT
 #define UF2_BOARD_ID      "ESP32S2FN4R2-S2Mini-1-0-0"
-#define UF2_VOLUME_LABEL  "S2MINIBOOT"
+#define UF2_VOLUME_LABEL  "ENERTYMBOOT"
 #define UF2_INDEX_URL     "https://circuitpython.org/board/lolin_s2_mini/"
