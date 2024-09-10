@@ -280,12 +280,16 @@ void board_dfu_complete(void) {
 }
 
 bool board_app_valid(void) {
-  // esp32s2 is always enter DFU mode
-  return false;
+  // // esp32s2 is always enter DFU mode
+  // return false;
+
+  // it is engineers' responsibility to check if application is valid
+  return true;
 }
 
 void board_app_jump(void) {
   // nothing to do
+  board_dfu_complete();
 }
 
 uint8_t board_usb_get_serial(uint8_t serial_id[16]) {

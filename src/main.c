@@ -32,6 +32,9 @@
 #include "uf2.h"
 #include "tusb.h"
 
+#include "esp_rom_gpio.h"
+#include "hal/gpio_hal.h"
+
 //--------------------------------------------------------------------+
 // MACRO CONSTANT TYPEDEF PROTOTYPES
 //--------------------------------------------------------------------+
@@ -55,12 +58,14 @@ int main(void) {
   board_init();
   if (board_init2) board_init2();
   TUF2_LOG1("TinyUF2\r\n");
+  
 
 #if TINYUF2_PROTECT_BOOTLOADER
   board_flash_protect_bootloader(true);
 #endif
 
   // if not DFU mode, jump to App
+  TUF2_LOG1("Check DFU mode askhkljas\n");
   if (!check_dfu_mode()) {
     TU_LOG1("Jump to application\r\n");
     if (board_teardown) board_teardown();
@@ -91,6 +96,18 @@ int main(void) {
 #endif
 }
 
+bool board_dfu_trigger() {
+   // check if pin PIN_DFU_TRIGGER is LOW
+   // Double reset detect if board implements 1-bit memory with RC components
+    esp_rom_gpio_pad_select_gpio(PIN_DFU_TRIGGER);
+    PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[PIN_DFU_TRIGGER]);
+    if ( gpio_ll_get_level(&GPIO, PIN_DFU_TRIGGER) == 0 ) {
+      // detect DFU trigger
+      return true;
+    }
+    return false;
+  }
+
 // return true if start DFU mode, else App mode
 static bool check_dfu_mode(void) {
   // Check if app is valid
@@ -102,6 +119,14 @@ static bool check_dfu_mode(void) {
     TUF2_LOG1("App invalid\r\n");
     return true;
   }
+
+#if PIN_DFU_TRIGGER
+  // Check if DFU trigger pin is activated
+  if (board_dfu_trigger()) {
+    TUF2_LOG1("DFU trigger\r\n");
+    return true;
+  }
+#endif
 
 #if TINYUF2_DBL_TAP_DFU
    TUF2_LOG1_HEX(TINYUF2_DBL_TAP_REG);

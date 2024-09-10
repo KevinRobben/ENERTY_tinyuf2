@@ -35,7 +35,11 @@
 
 // GPIO that implement 1-bit memory with RC components which hold the
 // pin value long enough for double reset detection.
-#define PIN_DOUBLE_RESET_RC   36
+// #define PIN_DOUBLE_RESET_RC   34
+
+// GPIO to enter DFU OTA mode on reset
+// should be LOW to enter DFU mode
+ #define PIN_DFU_TRIGGER       36
 
 //--------------------------------------------------------------------+
 // LED
