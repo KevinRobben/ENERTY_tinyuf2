@@ -69,6 +69,10 @@ SOFTWARE.
 #define UF2_MAGIC_START1    0x9E5D5157UL // Randomly selected
 #define UF2_MAGIC_END       0x0AB16F30UL // Ditto
 
+#define SERIALNUM_MAGIC_START0  0x4E455253UL // "SER\n"
+#define SERIALNUM_MAGIC_START1  0x3EaF393BUL // Randomly selected
+#define SERIALNUM_MAGIC_END     0x3CFD3E32UL // Ditto
+
 // If set, the block is "comment" and should not be flashed to the device
 #define UF2_FLAG_NOFLASH    0x00000001
 #define UF2_FLAG_FAMILYID   0x00002000
@@ -101,6 +105,14 @@ typedef struct {
     uint32_t magicEnd;
 } UF2_Block;
 
+
+typedef struct {
+    uint32_t magicStart0;
+    uint32_t magicStart1;
+    uint8_t serialNumber[5];
+    uint8_t pad0[7];
+    uint32_t magicEnd;
+} SerialNum_Block;
 
 void uf2_init(void);
 void uf2_read_block(uint32_t block_no, uint8_t *data);

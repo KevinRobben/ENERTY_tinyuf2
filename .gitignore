@@ -3,6 +3,7 @@
 *.d
 *.P
 _build/
+build/
 _bin/
 *.h~
 *.cmake~

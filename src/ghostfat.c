@@ -28,9 +28,13 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+#include "nvs_flash.h"
+#include "nvs.h"
+
 #include "compile_date.h"
 #include "board_api.h"
 #include "uf2.h"
+#include "esp_private/system_internal.h" // for esp_restart()
 
 //--------------------------------------------------------------------+
 //
@@ -133,11 +137,15 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 #define UF2_BYTE_COUNT                  (UF2_SECTOR_COUNT * BPB_SECTOR_SIZE) // always a multiple of sector size, per UF2 spec
 
 
+const uintptr_t SERIALNUM_ADDRESS = 0x3FF000;
+#define SERIALNUM_LEN     5
+
 char infoUf2File[128*3] =
-    "TinyUF2 Bootloader " UF2_VERSION "\r\n"
+    "EnertyUF2 Bootloader " UF2_VERSION "\r\n"
     "Model: " UF2_PRODUCT_NAME "\r\n"
     "Board-ID: " UF2_BOARD_ID "\r\n"
     "Date: " COMPILE_DATE "\r\n"
+    "Serial Number: AAAAAAAAAA\r\n"
     "Flash Size: 0x";
 
 TINYUF2_CONST char indexFile[] =
@@ -149,6 +157,8 @@ TINYUF2_CONST char indexFile[] =
     "</script>"
     "</body>"
     "</html>\n";
+
+
 
 #ifdef TINYUF2_FAVICON_HEADER
 #include TINYUF2_FAVICON_HEADER
@@ -163,6 +173,7 @@ static FileContent_t info[] = {
     {.name = "AUTORUN INF", .content = autorunFile , .size = sizeof(autorunFile) - 1},
     {.name = "FAVICON ICO", .content = favicon_data, .size = favicon_len            },
 #endif
+    // {.name = "SERIAL  BIN", .content = serialNumberHex, .size = sizeof(serialNumberHex)}, // remove this
     // current.uf2 must be the last element and its content must be NULL
     {.name = "CURRENT UF2", .content = NULL       , .size = 0                       },
 };
@@ -233,6 +244,66 @@ static inline bool is_uf2_block (UF2_Block const *bl) {
          !(bl->flags & UF2_FLAG_NOFLASH);
 }
 
+static inline bool is_serialnum_block (SerialNum_Block const *bl) {
+  return (bl->magicStart0 == SERIALNUM_MAGIC_START0) &&
+         (bl->magicStart1 == SERIALNUM_MAGIC_START1) &&
+         (bl->magicEnd == SERIALNUM_MAGIC_END);
+}
+
+esp_err_t serialnum_from_nvs(uint8_t* serialNumberHex) {
+  nvs_handle_t nvs;
+  esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs);
+  if (err != ESP_OK) return err;
+
+  size_t required_size = 0;
+  err = nvs_get_blob(nvs, "serialnum", NULL, &required_size);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) return err;
+  if (required_size == 0) {
+    nvs_close(nvs);
+    // serialNumberHex = { 0x01, 0x23, 0x45, 0x67, 0x89 };
+    serialNumberHex[0] = 0x01;
+    serialNumberHex[1] = 0x23;
+    serialNumberHex[2] = 0x45;
+    serialNumberHex[3] = 0x67;
+    serialNumberHex[4] = 0x89;
+    return ESP_OK;
+  }
+  if (required_size != 5) return ESP_ERR_INVALID_SIZE;
+  err = nvs_get_blob(nvs, "serialnum", serialNumberHex, &required_size);
+  if (err != ESP_OK) return err;
+  
+  //close
+  nvs_close(nvs);
+  return ESP_OK;
+}
+
+esp_err_t serialnum_to_nvs(uint8_t serialNumberHex[5]) {
+  nvs_handle_t nvs;
+  esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs);
+  if (err != ESP_OK) return err;
+
+  err = nvs_set_blob(nvs, "serialnum", serialNumberHex, 5);
+  if (err != ESP_OK) return err;
+
+  // Commit
+  err = nvs_commit(nvs);
+  if (err != ESP_OK) return err;
+
+  //close
+  nvs_close(nvs);
+  esp_restart();
+  return ESP_OK;
+}
+
+esp_err_t init_nvs_partition(void) {
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  return err;
+}
+
 // cache the cluster start offset for each file
 // this allows more flexible algorithms w/o O(n) time
 static void init_starting_clusters(void) {
@@ -277,12 +348,76 @@ static void u32_to_hexstr(uint32_t value, char* buffer) {
   buffer[i] = '\0';
 }
 
+static void u8_to_hexstr(uint8_t value[], size_t arr_len, char* buffer) {
+  const char hexDigits[] = "0123456789ABCDEF";
+  size_t i;
+
+  for (i = 0; i < arr_len; i++) {
+    buffer[i * 2] = hexDigits[(value[i] >> 4) & 0xF];  // High nibble
+    buffer[i * 2 + 1] = hexDigits[value[i] & 0xF];      // Low nibble
+  }
+  buffer[i * 2] = '\0';  // Null terminator at the end
+}
+
 void uf2_init(void) {
   // TODO maybe limit to application size only if possible board_flash_app_size()
   _flash_size = board_flash_size();
-
   // update CURRENT.UF2 file size
   info[FID_UF2].size = UF2_BYTE_COUNT;
+
+  // ADDED BY ENERTY
+  uint8_t serialNumberHex[5];
+  esp_err_t err = init_nvs_partition(); // initialize the NVS partition for serial number storage
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND){
+    serialNumberHex[0] = 0x10;
+    serialNumberHex[1] = 0x10;
+    serialNumberHex[2] = 0x10;
+    serialNumberHex[3] = 0x11;
+    serialNumberHex[4] = 0x11;
+  } else if (err != ESP_OK)
+  {
+    serialNumberHex[0] = 0x11;
+    serialNumberHex[1] = 0x11;
+    serialNumberHex[2] = 0x11;
+    serialNumberHex[3] = 0x00;
+    serialNumberHex[4] = 0x00;
+  } else{
+      // Replace AAAAAAAAAA with the actual serial number
+      err = serialnum_from_nvs(serialNumberHex);
+      if (err == ESP_ERR_INVALID_SIZE){
+        serialNumberHex[0] = 0x10;
+        serialNumberHex[1] = 0x11;
+        serialNumberHex[2] = 0x10;
+        serialNumberHex[3] = 0x11;
+        serialNumberHex[4] = 0x10;
+      } else if (err == ESP_ERR_NVS_NOT_FOUND){
+        // serial number not found in NVS, use default
+        serialNumberHex[0] = 0x10;
+        serialNumberHex[1] = 0x10;
+        serialNumberHex[2] = 0x10;
+        serialNumberHex[3] = 0x10;
+        serialNumberHex[4] = 0x10;
+      } else if (err != ESP_OK) {
+        serialNumberHex[0] = 0x11;
+        serialNumberHex[1] = 0x00;
+        serialNumberHex[2] = 0x11;
+        serialNumberHex[3] = 0x00;
+        serialNumberHex[4] = 0x11;
+      }
+      char serialNumber[11];  // 10 characters + null terminator
+      u8_to_hexstr(serialNumberHex, 5, serialNumber);
+
+      // Find and replace "AAAAAAAAAA" in the info file
+      char *serialPosition = strstr(infoUf2File, "AAAAAAAAAA");
+      if (serialPosition != NULL) {
+        // Replace the AAAAAAAAAA with the actual serial number
+        strncpy(serialPosition, serialNumber, 10);  // 10 characters (no null terminator)
+      }
+  }
+  
+
+  
+
 
   // update INFO_UF2.TXT with flash size if having enough space (8 bytes)
   size_t txt_len = strlen(infoUf2File);
@@ -298,7 +433,8 @@ void uf2_init(void) {
   }
   info[FID_INFO].size = txt_len;
 
-  init_starting_clusters();
+  init_starting_clusters(); // fill the info struct with cluster start and end values
+  
 }
 
 /*------------------------------------------------------------------*/
@@ -484,7 +620,19 @@ int uf2_write_block (uint32_t block_no, uint8_t *data, WriteState *state) {
   (void) block_no;
   UF2_Block *bl = (void*) data;
 
-  if ( !is_uf2_block(bl) ) return -1;
+  if ( !is_uf2_block(bl) ) {
+    // added by ENERTY
+    SerialNum_Block *sn = (void*) data;
+    if ( is_serialnum_block(sn) ) {
+      // write serial number to nvs
+      esp_err_t err = serialnum_to_nvs(sn->serialNumber);
+      if (err != ESP_OK) {
+        return -1;
+      }
+      return BPB_SECTOR_SIZE;
+    }
+    return -1;
+  }
 
   if (bl->familyID == BOARD_UF2_FAMILY_ID) {
     // generic family ID

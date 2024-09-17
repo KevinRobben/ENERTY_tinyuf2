@@ -1,6 +1,0 @@
-CMake Error at C:/GithubRepos/Energy_Storage_System_projects/ENERTY_tinyuf2/ports/family_support.cmake:17 (message):
-  BOARD not specified
-Call Stack (most recent call first):
-  CMakeLists.txt:5 (include)
-
-
