@@ -39,21 +39,32 @@ static uint8_t _fl_buf[FLASH_CACHE_SIZE] __attribute__((aligned(4)));
 
 // uf2 will always write to ota0 partition
 static esp_partition_t const* _part_ota0 = NULL;
+// measurment data write to ata1 partition
+static esp_partition_t const* _part_measurement_data = NULL;
 
 void board_flash_init(void) {
   _fl_addr = FLASH_CACHE_INVALID_ADDR;
 
   _part_ota0 = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
   assert(_part_ota0 != NULL);
+  _part_measurement_data = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+  assert(_part_measurement_data != NULL);
 }
 
 uint32_t board_flash_size(void) {
   return _part_ota0->size;
 }
 
+
 void board_flash_read(uint32_t addr, void* buffer, uint32_t len) {
   esp_partition_read(_part_ota0, addr, buffer, len);
 }
+
+void board_measuremnt_data_read(uint32_t addr, void* buffer, uint32_t len) {
+  esp_partition_read(_part_measurement_data, addr, buffer, len);
+}
+
+
 
 void board_flash_flush(void) {
   if (_fl_addr == FLASH_CACHE_INVALID_ADDR) return;

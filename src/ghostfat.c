@@ -42,6 +42,8 @@
 
 // ota0 partition size
 static uint32_t _flash_size;
+// size of the measurement data inside the ota1 partition
+static uint32_t _measurement_flash_size;
 
 #define STATIC_ASSERT(_exp) _Static_assert(_exp, "static assert failed")
 
@@ -136,6 +138,11 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 #define UF2_SECTOR_COUNT                (_flash_size / UF2_FIRMWARE_BYTES_PER_SECTOR)
 #define UF2_BYTE_COUNT                  (UF2_SECTOR_COUNT * BPB_SECTOR_SIZE) // always a multiple of sector size, per UF2 spec
 
+#define MEASUREMNT_SECOTR_COUNT         (_measurement_flash_size / UF2_FIRMWARE_BYTES_PER_SECTOR)
+#define MEASURMENT_BYTE_COUNT           (MEASUREMNT_SECOTR_COUNT * BPB_SECTOR_SIZE)
+// Define a general macro for calculating byte count
+#define BYTE_COUNT(_flash_size)        (((_flash_size) / UF2_FIRMWARE_BYTES_PER_SECTOR) * BPB_SECTOR_SIZE)
+
 
 const uintptr_t SERIALNUM_ADDRESS = 0x3FF000;
 #define SERIALNUM_LEN     5
@@ -145,7 +152,7 @@ char infoUf2File[128*3] =
     "Model: " UF2_PRODUCT_NAME "\r\n"
     "Board-ID: " UF2_BOARD_ID "\r\n"
     "Date: " COMPILE_DATE "\r\n"
-    "Serial Number: AAAAAAAAAA\r\n"
+    "Serial Number: AAAAAAAAAAA\r\n"
     "Flash Size: 0x";
 
 TINYUF2_CONST char indexFile[] =
@@ -158,6 +165,17 @@ TINYUF2_CONST char indexFile[] =
     "</body>"
     "</html>\n";
 
+char test_csv_data[] = "time,CT1,CT2,CT3\n"
+                        "0,0,0,0\n"
+                        "1,1,1,1\n"
+                        "2,2,2,2\n"
+                        "3,3,3,3\n"
+                        "4,4,4,4\n"
+                        "5,5,5,5\n"
+                        "6,6,6,6\n"
+                        "7,7,7,7\n"
+                        "8,8,8,8\n"
+                        "9,9,9,9\n";
 
 
 #ifdef TINYUF2_FAVICON_HEADER
@@ -174,6 +192,8 @@ static FileContent_t info[] = {
     {.name = "FAVICON ICO", .content = favicon_data, .size = favicon_len            },
 #endif
     // {.name = "SERIAL  BIN", .content = serialNumberHex, .size = sizeof(serialNumberHex)}, // remove this
+    {.name = "TEST    CSV", .content = test_csv_data, .size = sizeof(test_csv_data) - 1},
+    {.name = "MEASDAT CSV", .content = NULL, .size = 0},
     // current.uf2 must be the last element and its content must be NULL
     {.name = "CURRENT UF2", .content = NULL       , .size = 0                       },
 };
@@ -186,6 +206,7 @@ enum {
 enum {
   FID_INFO = 0,
   FID_INDEX = 1,
+  FID_MEASURMENT_DATA = NUM_FILES - 2,
   FID_UF2 = NUM_FILES - 1,
 };
 
@@ -250,39 +271,40 @@ static inline bool is_serialnum_block (SerialNum_Block const *bl) {
          (bl->magicEnd == SERIALNUM_MAGIC_END);
 }
 
-esp_err_t serialnum_from_nvs(uint8_t* serialNumberHex) {
-  nvs_handle_t nvs;
-  esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs);
-  if (err != ESP_OK) return err;
-
+esp_err_t serialnum_from_nvs(nvs_handle_t* nvs, uint8_t* serialNumberHex) {
   size_t required_size = 0;
-  err = nvs_get_blob(nvs, "serialnum", NULL, &required_size);
+  esp_err_t err = nvs_get_blob(*nvs, "serialnum", NULL, &required_size);
   if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) return err;
   if (required_size == 0) {
-    nvs_close(nvs);
     // serialNumberHex = { 0x01, 0x23, 0x45, 0x67, 0x89 };
     serialNumberHex[0] = 0x01;
     serialNumberHex[1] = 0x23;
     serialNumberHex[2] = 0x45;
     serialNumberHex[3] = 0x67;
     serialNumberHex[4] = 0x89;
+    serialNumberHex[5] = 0x00;
     return ESP_OK;
   }
-  if (required_size != 5) return ESP_ERR_INVALID_SIZE;
-  err = nvs_get_blob(nvs, "serialnum", serialNumberHex, &required_size);
+  if (required_size != 6) return ESP_ERR_INVALID_SIZE;
+  err = nvs_get_blob(*nvs, "serialnum", serialNumberHex, &required_size);
   if (err != ESP_OK) return err;
-  
-  //close
-  nvs_close(nvs);
   return ESP_OK;
 }
 
-esp_err_t serialnum_to_nvs(uint8_t serialNumberHex[5]) {
+size_t get_measurment_data_size_nvs(nvs_handle_t* nvs){
+  uint32_t size;
+  size_t required_size = sizeof(size);
+  esp_err_t err = nvs_get_blob(*nvs, "measurment_data_size", &size, &required_size);
+  if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) return 512;
+  return size;
+}
+
+esp_err_t serialnum_to_nvs(uint8_t serialNumberHex[6]) {
   nvs_handle_t nvs;
   esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs);
   if (err != ESP_OK) return err;
 
-  err = nvs_set_blob(nvs, "serialnum", serialNumberHex, 5);
+  err = nvs_set_blob(nvs, "serialnum", serialNumberHex, 6);
   if (err != ESP_OK) return err;
 
   // Commit
@@ -366,7 +388,7 @@ void uf2_init(void) {
   info[FID_UF2].size = UF2_BYTE_COUNT;
 
   // ADDED BY ENERTY
-  uint8_t serialNumberHex[5];
+  uint8_t serialNumberHex[6];
   esp_err_t err = init_nvs_partition(); // initialize the NVS partition for serial number storage
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND){
     serialNumberHex[0] = 0x10;
@@ -374,6 +396,7 @@ void uf2_init(void) {
     serialNumberHex[2] = 0x10;
     serialNumberHex[3] = 0x11;
     serialNumberHex[4] = 0x11;
+    serialNumberHex[5] = 0x00;
   } else if (err != ESP_OK)
   {
     serialNumberHex[0] = 0x11;
@@ -381,44 +404,52 @@ void uf2_init(void) {
     serialNumberHex[2] = 0x11;
     serialNumberHex[3] = 0x00;
     serialNumberHex[4] = 0x00;
+    serialNumberHex[5] = 0x00;
   } else{
-      // Replace AAAAAAAAAA with the actual serial number
-      err = serialnum_from_nvs(serialNumberHex);
-      if (err == ESP_ERR_INVALID_SIZE){
-        serialNumberHex[0] = 0x10;
-        serialNumberHex[1] = 0x11;
-        serialNumberHex[2] = 0x10;
-        serialNumberHex[3] = 0x11;
-        serialNumberHex[4] = 0x10;
-      } else if (err == ESP_ERR_NVS_NOT_FOUND){
-        // serial number not found in NVS, use default
-        serialNumberHex[0] = 0x10;
-        serialNumberHex[1] = 0x10;
-        serialNumberHex[2] = 0x10;
-        serialNumberHex[3] = 0x10;
-        serialNumberHex[4] = 0x10;
-      } else if (err != ESP_OK) {
-        serialNumberHex[0] = 0x11;
-        serialNumberHex[1] = 0x00;
-        serialNumberHex[2] = 0x11;
-        serialNumberHex[3] = 0x00;
-        serialNumberHex[4] = 0x11;
-      }
-      char serialNumber[11];  // 10 characters + null terminator
-      u8_to_hexstr(serialNumberHex, 5, serialNumber);
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs);
+    // Replace AAAAAAAAAAA with the actual serial number
+    err = serialnum_from_nvs(&nvs, serialNumberHex);
+    if (err == ESP_ERR_INVALID_SIZE){
+      serialNumberHex[0] = 0x10;
+      serialNumberHex[1] = 0x11;
+      serialNumberHex[2] = 0x10;
+      serialNumberHex[3] = 0x11;
+      serialNumberHex[4] = 0x10;
+      serialNumberHex[5] = 0x00;
+    } else if (err == ESP_ERR_NVS_NOT_FOUND){
+      // serial number not found in NVS, use default
+      serialNumberHex[0] = 0x10;
+      serialNumberHex[1] = 0x10;
+      serialNumberHex[2] = 0x10;
+      serialNumberHex[3] = 0x10;
+      serialNumberHex[4] = 0x10;
+      serialNumberHex[5] = 0x00;
+    } else if (err != ESP_OK) {
+      serialNumberHex[0] = 0x11;
+      serialNumberHex[1] = 0x00;
+      serialNumberHex[2] = 0x11;
+      serialNumberHex[3] = 0x00;
+      serialNumberHex[4] = 0x11;
+      serialNumberHex[5] = 0x00;
+    }
+    char serialNumber[12];  // 11 characters + null terminator
+    u8_to_hexstr(serialNumberHex + 1, 5, serialNumber + 1); // the first byte should not be converted, it is the hardware identifier and already a character
+    serialNumber[0] = serialNumberHex[0];  // the first byte is a character
 
-      // Find and replace "AAAAAAAAAA" in the info file
-      char *serialPosition = strstr(infoUf2File, "AAAAAAAAAA");
-      if (serialPosition != NULL) {
-        // Replace the AAAAAAAAAA with the actual serial number
-        strncpy(serialPosition, serialNumber, 10);  // 10 characters (no null terminator)
-      }
+    // Find and replace "AAAAAAAAAAA" in the info file
+    char *serialPosition = strstr(infoUf2File, "AAAAAAAAAAA");
+    if (serialPosition != NULL) {
+      // Replace the AAAAAAAAAAA with the actual serial number
+      strncpy(serialPosition, serialNumber, 11);  // 10 characters (no null terminator)
+    }
+
+    // get the size measurment data from the NVS+
+    _measurement_flash_size = get_measurment_data_size_nvs(&nvs);
+    info[FID_MEASURMENT_DATA].size = MEASURMENT_BYTE_COUNT;
+    nvs_close(nvs);
   }
   
-
-  
-
-
   // update INFO_UF2.TXT with flash size if having enough space (8 bytes)
   size_t txt_len = strlen(infoUf2File);
   size_t const max_len = sizeof(infoUf2File) - 1;
@@ -434,7 +465,6 @@ void uf2_init(void) {
   info[FID_INFO].size = txt_len;
 
   init_starting_clusters(); // fill the info struct with cluster start and end values
-  
 }
 
 /*------------------------------------------------------------------*/
@@ -566,7 +596,7 @@ void uf2_read_block (uint32_t block_no, uint8_t *data) {
 
     uint32_t fileRelativeSector = sectionRelativeSector - (info[fid].cluster_start-2) * BPB_SECTORS_PER_CLUSTER;
 
-    if ( fid != FID_UF2 ) {
+    if ( fid != FID_UF2 && fid != FID_MEASURMENT_DATA ) {
       // Handle all files other than CURRENT.UF2
       size_t fileContentStartOffset = fileRelativeSector * BPB_SECTOR_SIZE;
       size_t fileContentLength = inf->size;
@@ -584,7 +614,7 @@ void uf2_read_block (uint32_t block_no, uint8_t *data) {
         memcpy(data, dataStart, bytesToCopy);
       }
     }
-    else {
+    else if(fid == FID_UF2) {
       // CURRENT.UF2: generate data on-the-fly
       uint32_t addr = BOARD_FLASH_APP_START + (fileRelativeSector * UF2_FIRMWARE_BYTES_PER_SECTOR);
       if ( addr < (BOARD_FLASH_ADDR_ZERO + _flash_size) ) {
@@ -600,6 +630,22 @@ void uf2_read_block (uint32_t block_no, uint8_t *data) {
         bl->familyID = BOARD_UF2_FAMILY_ID;
 
         board_flash_read(addr, bl->data, bl->payloadSize);
+      }
+    }
+    else {
+      // Handle all files other than CURRENT.UF2
+      size_t fileContentStartOffset = (fileRelativeSector * BPB_SECTOR_SIZE);
+      size_t fileContentLength = inf->size;
+
+            // nothing to copy if already past the end of the file (only when >1 sector per cluster)
+      if (fileContentLength > fileContentStartOffset) {
+        // limit number of bytes of data to be copied to remaining valid bytes
+        size_t bytesToCopy = fileContentLength - fileContentStartOffset;
+        // and further limit that to a single sector at a time
+        if (bytesToCopy > BPB_SECTOR_SIZE) {
+          bytesToCopy = BPB_SECTOR_SIZE;
+        }
+        board_measuremnt_data_read(fileContentStartOffset, data, bytesToCopy);
       }
     }
   }

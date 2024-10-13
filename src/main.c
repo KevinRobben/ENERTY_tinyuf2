@@ -32,6 +32,8 @@
 #include "uf2.h"
 #include "tusb.h"
 
+#include "rom/rtc.h" // for RTC_RESET_CAUSE_REG
+
 #include "esp_rom_gpio.h"
 #include "hal/gpio_hal.h"
 
@@ -95,6 +97,35 @@ int main(void) {
   }
 #endif
 }
+
+//--------------------------------------------------------------------+
+// Get Reset Reason Hint requested by Application to enter UF2
+//--------------------------------------------------------------------+
+
+// copied from components/esp_system/port/soc/esp32sx/reset_reason.c
+// since esp_system is not included with bootloader build
+#define RST_REASON_BIT  0x80000000
+#define RST_REASON_MASK 0x7FFF
+#define RST_REASON_SHIFT 16
+
+uint32_t esp_reset_reason_get_hint(void) {
+    uint32_t reset_reason_hint = REG_READ(RTC_RESET_CAUSE_REG);
+    uint32_t high = (reset_reason_hint >> RST_REASON_SHIFT) & RST_REASON_MASK;
+    uint32_t low = reset_reason_hint & RST_REASON_MASK;
+    if ((reset_reason_hint & RST_REASON_BIT) == 0 || high != low) {
+        return 0;
+    }
+    return low;
+}
+
+static void esp_reset_reason_clear_hint(void) {
+    REG_WRITE(RTC_RESET_CAUSE_REG, 0);
+}
+
+//--------------------------------------------------------------------+
+// END: Get Reset Reason Hint requested by Application to enter UF2
+//--------------------------------------------------------------------+
+
 
 bool board_dfu_trigger() {
    // check if pin PIN_DFU_TRIGGER is LOW
@@ -180,7 +211,16 @@ static bool check_dfu_mode(void) {
   TINYUF2_DBL_TAP_REG = 0;
 #endif
 
-  return false;
+  // Reset Reason Hint to enter UF2. Check out esp_reset_reason_t for other Espressif pre-defined values
+  #define APP_REQUEST_UF2_RESET_HINT   0x11F2
+  // check reset reason
+  uint32_t const reset_hint = (uint32_t) esp_reset_reason_get_hint();
+    if ( APP_REQUEST_UF2_RESET_HINT == reset_hint ) {
+      esp_reset_reason_clear_hint(); // clear the hint
+      return true;
+  }
+
+  return false; 
 }
 
 //--------------------------------------------------------------------+

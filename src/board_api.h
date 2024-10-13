@@ -210,6 +210,9 @@ uint32_t board_flash_size(void);
 // Read from flash
 void board_flash_read (uint32_t addr, void* buffer, uint32_t len);
 
+// read from ota1 partition
+void board_measuremnt_data_read(uint32_t addr, void* buffer, uint32_t len);
+
 // Write to flash, len is uf2's payload size (often 256 bytes)
 bool board_flash_write(uint32_t addr, void const* data, uint32_t len);
 

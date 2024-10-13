@@ -192,7 +192,7 @@ static int selected_boot_partition(const bootloader_state_t *bs) {
             uint32_t const reset_hint = (uint32_t) esp_reset_reason_get_hint();
             ESP_LOGI(TAG, "Reset hint = %d", reset_hint);
             if ( APP_REQUEST_UF2_RESET_HINT == reset_hint ) {
-              esp_reset_reason_clear_hint(); // clear the hint
+              // esp_reset_reason_clear_hint(); // clear the hint // hint is cleared in uft bootloader
               ESP_LOGI(TAG, "Detect application request to enter UF2 bootloader");
               boot_index = FACTORY_INDEX;
             }

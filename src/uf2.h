@@ -109,8 +109,8 @@ typedef struct {
 typedef struct {
     uint32_t magicStart0;
     uint32_t magicStart1;
-    uint8_t serialNumber[5];
-    uint8_t pad0[7];
+    uint8_t serialNumber[6];
+    uint8_t pad0[6];
     uint32_t magicEnd;
 } SerialNum_Block;
 
