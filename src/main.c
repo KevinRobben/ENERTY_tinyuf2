@@ -151,7 +151,7 @@ static bool check_dfu_mode(void) {
     return true;
   }
 
-#if PIN_DFU_TRIGGER
+#ifdef PIN_DFU_TRIGGER
   // Check if DFU trigger pin is activated
   if (board_dfu_trigger()) {
     TUF2_LOG1("DFU trigger\r\n");
