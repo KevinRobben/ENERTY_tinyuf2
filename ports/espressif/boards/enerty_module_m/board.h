@@ -66,10 +66,17 @@
 // USB UF2
 //--------------------------------------------------------------------+
 
-#define USB_VID           0x303A
+// // TinyUFT vid/pid resevered for Enerty
+// #define USB_VID           0x303A
+// #define USB_PID           0x80DA
+// #define USB_MANUFACTURER  "ENERTY"
+// #define USB_PRODUCT       "Module M"
+
+// USB to RS485 converter VID and PID
+#define USB_VID           0x0403
 #define USB_PID           0x80DA
-#define USB_MANUFACTURER  "ENERTY"
-#define USB_PRODUCT       "Module M"
+#define USB_MANUFACTURER  "FTDI"
+#define USB_PRODUCT       "USB-RS485 Cable"
 
 #define UF2_PRODUCT_NAME  USB_MANUFACTURER " " USB_PRODUCT
 #define UF2_BOARD_ID      "ESP32S2FN4R2-ModuleM-1-0-0"
